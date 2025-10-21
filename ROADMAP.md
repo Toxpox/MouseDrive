@@ -23,3 +23,9 @@ This roadmap tracks the evolution of `MouseDrive.cpp` in the `MouseDrive V0.1-Al
 ## Stretch Goals
 - [ ] Companion overlay for in-game telemetry and visual feedback.
 - [ ] Automatic update mechanism with release channel selection.
+
+
+## Additional 
+- [ ] Multi Language Support
+    - [ ] English
+    - [X] Turkish
