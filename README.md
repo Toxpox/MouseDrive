@@ -41,6 +41,7 @@ All runtime tuning lives in the `Config` struct inside `MouseDrive.cpp`. Paramet
 ```
 MouseDrive/
 ├─ MouseDrive.cpp      # Single translation unit for the alpha console build.
+├─ LICENSE
 ├─ README.md           # This document.
 ├─ ROADMAP.md          # Planned development milestones.
 └─ REQUIREMENTS.md     # Dependency checklist and build tooling notes.
