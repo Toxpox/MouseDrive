@@ -52,7 +52,7 @@ MouseDrive/
 - Keep documentation in sync with the behaviour of `MouseDrive.cpp` when you add or adjust features.
 
 ## Roadmap
-Refer to [ROADMAP.md](ROADMAP.md) for the planned evolution of this alpha build.
+[ROADMAP.md](ROADMAP.md) 
 
 ## 📝 License
 
