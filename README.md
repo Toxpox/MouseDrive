@@ -6,6 +6,7 @@
 
 MouseDrive is a Windows app that converts mouse input into a vJoy virtual joystick.
 
+[Old C++ verison](https://github.com/Toxpox/MouseDrive-old-cpp)
 
 ## What it does
 
