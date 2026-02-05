@@ -3,6 +3,7 @@
 [![Platform](https://img.shields.io/badge/platform-Windows-0078D6)](#requirements)
 [![Language](https://img.shields.io/badge/language-Rust-black)](#build)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FToxpox%2FMouseDrive.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FToxpox%2FMouseDrive?ref=badge_shield)
 
 MouseDrive is a Windows app that converts mouse input into a vJoy virtual joystick.
 
@@ -68,3 +69,6 @@ MouseDrive Rust/
 
 Copyright © 2025 [Toxpox](https://github.com/Toxpox).<br/>
 This project is [MIT License](https://github.com/Toxpox/MouseDrive/blob/main/LICENSE) licensed.
+
+
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FToxpox%2FMouseDrive.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2FToxpox%2FMouseDrive?ref=badge_large)
