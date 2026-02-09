@@ -4,6 +4,7 @@ mod vjoy;
 mod config;
 mod input;
 mod logic;
+mod lang;
 mod ui;
 
 use std::ffi::c_void;

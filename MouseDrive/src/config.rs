@@ -9,6 +9,7 @@ pub struct Config {
     pub input_sink_enabled: bool,
     pub exit_on_close: bool,
     pub capture_toggle_key: i32,
+    pub language: i32,
 
     // direksiyon
     pub mouse_sens: f64,
@@ -51,6 +52,7 @@ impl Default for Config {
             input_sink_enabled: true,
             exit_on_close: false,
             capture_toggle_key: 0x77, // F8
+            language: 1, // 0=TR, 1=EN
 
             mouse_sens: 3.0,
             mouse_dpi_scale: 1.0,
