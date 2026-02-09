@@ -28,6 +28,7 @@ Or browse all versions at [Releases](https://github.com/Toxpox/MouseDrive/releas
 - **Config persistence** — TOML-based config with load/save/reset
 - **Raw input capture** — Works even when the window is not focused (F8 toggle)
 - **Lock-free architecture** — Atomic globals between raw input thread and GUI thread
+- **Language support** — Turkish and English UI (switchable in Settings > General)
 
 > *Experimental
 
