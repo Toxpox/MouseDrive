@@ -1,4 +1,4 @@
-# MouseDrive (Rust) — v0.3.0
+# MouseDrive (Rust) — v0.3.0-a
 
 [![Platform](https://img.shields.io/badge/platform-Windows-0078D6)](#requirements)
 [![Language](https://img.shields.io/badge/language-Rust-black)](#build)
@@ -8,6 +8,10 @@
 MouseDrive is a Windows application that converts mouse and keyboard input into virtual joystick signals via [vJoy](https://github.com/BrunnerInnovation/vJoy), designed for racing simulators.
 
 [Old C++ version](https://github.com/Toxpox/MouseDrive-old-cpp)
+
+<p align="center">
+  <img src="MouseDrive/image/MainPage.png" width="700"/>
+</p>
 
 ## Download
 
