@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FToxpox%2FMouseDrive.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FToxpox%2FMouseDrive?ref=badge_shield)
 
-MouseDrive is a Windows application that converts mouse and keyboard input into virtual joystick signals via [vJoy](https://github.com/shauleiz/vJoy), designed for racing simulators.
+MouseDrive is a Windows application that converts mouse and keyboard input into virtual joystick signals via [vJoy](https://github.com/BrunnerInnovation/vJoy), designed for racing simulators.
 
 [Old C++ version](https://github.com/Toxpox/MouseDrive-old-cpp)
 
@@ -60,8 +60,10 @@ Or browse all versions at [Releases](https://github.com/Toxpox/MouseDrive/releas
 
 - Windows 10/11
 - [Executable MouseDrive](https://github.com/Toxpox/MouseDrive/releases/latest)
-- [vJoy Driver](https://github.com/BrunnerInnovation/vJoy) installed and enabled
+- [vJoy Driver**](https://github.com/BrunnerInnovation/vJoy) installed and enabled
 - `vJoyInterface.dll` available (next to exe or in `PATH`)
+
+>  ** Tested with V2.2.2.0
 
 ## Build
 
