@@ -57,12 +57,7 @@ cargo build
 
 ## Project layout
 ```
-MouseDrive Rust/
-├─ Cargo.toml
-├─ Cargo.lock
-├─ src/
-│  └─ main.rs
-└─ README.md
+
 ```
 
 ## License
