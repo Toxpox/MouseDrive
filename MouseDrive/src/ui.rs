@@ -2,23 +2,29 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use eframe::egui;
-use windows::Win32::UI::WindowsAndMessaging::PostQuitMessage;
+use windows::Win32::Foundation::{LPARAM, WPARAM};
+use windows::Win32::UI::WindowsAndMessaging::PostThreadMessageW;
 
-use crate::config::{Config, get_config_path};
-use crate::input::{LEFT_BUTTON, RIGHT_BUTTON, RAW_INPUT_HWND};
-use crate::lang::{Lang, strings};
-use crate::logic::STEERING_RANGE;
 use crate::MouseDriveApp;
+use crate::config::{Config, get_config_path};
+use crate::input::{LEFT_BUTTON, RAW_INPUT_THREAD_ID, RIGHT_BUTTON};
+use crate::lang::{Lang, Strings, strings};
+use crate::logic::STEERING_RANGE;
+use crate::vjoy::VJoyStatus;
 
 const TAB_STEERING: u8 = 0;
 const TAB_THROTTLE: u8 = 1;
 const TAB_BRAKE: u8 = 2;
 const TAB_GENERAL: u8 = 3;
 
+const WM_QUIT: u32 = 0x0012;
+
 impl eframe::App for MouseDriveApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.update_input();
-        ctx.request_repaint_after(Duration::from_millis(self.config.thread_interval_ms.max(1) as u64));
+        ctx.request_repaint_after(Duration::from_millis(
+            self.config.thread_interval_ms.max(1) as u64
+        ));
 
         let s = strings(Lang::from_i32(self.config.language));
 
@@ -43,32 +49,30 @@ impl eframe::App for MouseDriveApp {
                 });
                 ui.separator();
 
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    match self.settings_tab {
-                        TAB_STEERING => self.draw_steering_tab(ui, s),
-                        TAB_THROTTLE => self.draw_throttle_tab(ui, s),
-                        TAB_BRAKE => self.draw_brake_tab(ui, s),
-                        TAB_GENERAL => self.draw_general_tab(ui, s),
-                        _ => {}
-                    }
+                egui::ScrollArea::vertical().show(ui, |ui| match self.settings_tab {
+                    TAB_STEERING => self.draw_steering_tab(ui, s),
+                    TAB_THROTTLE => self.draw_throttle_tab(ui, s),
+                    TAB_BRAKE => self.draw_brake_tab(ui, s),
+                    TAB_GENERAL => self.draw_general_tab(ui, s),
+                    _ => {}
                 });
 
                 ui.separator();
 
                 // Alt butonlar
                 ui.horizontal_wrapped(|ui| {
-                    if ui.button(s.btn_load).clicked() {
-                        if let Some(path) = get_config_path() {
-                            if let Some(cfg) = Config::load_from_file(&path) {
-                                self.config = cfg;
-                                self.sync_globals_from_config();
-                            }
-                        }
+                    if ui.button(s.btn_load).clicked()
+                        && let Some(path) = get_config_path()
+                        && let Some(mut cfg) = Config::load_from_file(&path)
+                    {
+                        cfg.validate();
+                        self.config = cfg;
+                        self.sync_globals_from_config();
                     }
-                    if ui.button(s.btn_save).clicked() {
-                        if let Some(path) = get_config_path() {
-                            let _ = self.config.save_to_file(&path);
-                        }
+                    if ui.button(s.btn_save).clicked()
+                        && let Some(path) = get_config_path()
+                    {
+                        let _ = self.config.save_to_file(&path);
                     }
                     if ui.button(s.btn_default).clicked() {
                         self.config = Config::default();
@@ -85,18 +89,19 @@ impl eframe::App for MouseDriveApp {
                 if ui.button(s.settings).clicked() {
                     self.settings_panel_open = !self.settings_panel_open;
                 }
-                ui.heading(format!("MouseDrive v{}", env!("CARGO_PKG_VERSION")));
+                ui.heading(&self.title);
             });
             ui.separator();
 
             // Durum cubugu
+            let status_text = vjoy_status_text(&self.vjoy_status, s);
             egui::Frame::NONE
                 .inner_margin(egui::Margin::symmetric(6, 4))
                 .corner_radius(4.0)
                 .fill(ui.visuals().faint_bg_color)
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(&self.vjoy_status);
+                        ui.label(status_text);
                         ui.separator();
                         ui.label(if self.state.capture_enabled {
                             s.capture_active
@@ -137,6 +142,11 @@ impl eframe::App for MouseDriveApp {
             ui.separator();
 
             // Girdi durumu
+            let lmb = LEFT_BUTTON.load(Ordering::Acquire);
+            let rmb = RIGHT_BUTTON.load(Ordering::Acquire);
+            let w_on = self.state.w_key_pressed;
+            let s_on = self.state.s_key_pressed;
+
             egui::Frame::NONE
                 .inner_margin(egui::Margin::symmetric(6, 4))
                 .corner_radius(4.0)
@@ -146,11 +156,11 @@ impl eframe::App for MouseDriveApp {
                         ui.label(format!(
                             "{}: {} | {}: {} | W: {} | S: {}",
                             s.left_click,
-                            if LEFT_BUTTON.load(Ordering::SeqCst) { "ON" } else { "--" },
+                            if lmb { "ON" } else { "--" },
                             s.right_click,
-                            if RIGHT_BUTTON.load(Ordering::SeqCst) { "ON" } else { "--" },
-                            if self.state.w_key_pressed { "ON" } else { "--" },
-                            if self.state.s_key_pressed { "ON" } else { "--" },
+                            if rmb { "ON" } else { "--" },
+                            if w_on { "ON" } else { "--" },
+                            if s_on { "ON" } else { "--" },
                         ));
                     });
                 });
@@ -171,20 +181,38 @@ impl eframe::App for MouseDriveApp {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // vJoy eksenlerini sifirla ve cihazi serbest birak
         if let Some(ref vjoy) = self.vjoy {
             vjoy.reset(self.device_id);
             vjoy.relinquish(self.device_id);
         }
-        let hwnd = RAW_INPUT_HWND.load(Ordering::SeqCst);
-        if hwnd != 0 {
-            unsafe { PostQuitMessage(0); }
+
+        // Graceful shutdown: raw input thread'e WM_QUIT gonder
+        // PostThreadMessageW ile hedef thread'in mesaj dongusu temiz kapanir
+        let thread_id = RAW_INPUT_THREAD_ID.load(Ordering::SeqCst);
+        if thread_id != 0 {
+            unsafe {
+                let _ = PostThreadMessageW(thread_id, WM_QUIT, WPARAM(0), LPARAM(0));
+            }
         }
     }
 }
 
-// --- Sekme icerik fonksiyonlari ---
+// --- vJoy durum metni (lokalize) ---
 
-use crate::lang::Strings;
+fn vjoy_status_text<'a>(status: &VJoyStatus, s: &'a Strings) -> &'a str {
+    match status {
+        VJoyStatus::Connected => s.vjoy_connected,
+        VJoyStatus::DllNotFound => s.vjoy_dll_not_found,
+        VJoyStatus::DriverDisabled => s.vjoy_driver_disabled,
+        VJoyStatus::DeviceBusy => s.vjoy_device_busy,
+        VJoyStatus::DeviceMissing => s.vjoy_device_missing,
+        VJoyStatus::AcquireFailed => s.vjoy_acquire_failed,
+        VJoyStatus::Unknown => s.vjoy_unknown,
+    }
+}
+
+// --- Sekme icerik fonksiyonlari ---
 
 impl MouseDriveApp {
     fn draw_steering_tab(&mut self, ui: &mut egui::Ui, s: &Strings) {
@@ -201,7 +229,11 @@ impl MouseDriveApp {
             ui.label(s.mode);
             egui::ComboBox::from_id_salt("steering_mode")
                 .selected_text(match self.config.steering_mode {
-                    0 => s.mode_linear, 1 => s.mode_expo, 2 => s.mode_filtered, 3 => s.mode_self_center, _ => s.mode_linear,
+                    0 => s.mode_linear,
+                    1 => s.mode_expo,
+                    2 => s.mode_filtered,
+                    3 => s.mode_self_center,
+                    _ => s.mode_linear,
                 })
                 .show_ui(ui, |ui| {
                     ui.selectable_value(&mut self.config.steering_mode, 0, s.mode_linear);
@@ -211,39 +243,127 @@ impl MouseDriveApp {
                 });
         });
 
-        slider_f64(ui, s.deadzone, &mut self.config.steering_deadzone, 0.0..=0.5);
-        slider_f64(ui, s.saturation, &mut self.config.steering_saturation, 0.5..=1.0);
+        slider_f64(
+            ui,
+            s.deadzone,
+            &mut self.config.steering_deadzone,
+            0.0..=0.5,
+        );
+        slider_f64(
+            ui,
+            s.saturation,
+            &mut self.config.steering_saturation,
+            0.5..=1.0,
+        );
         slider_f64(ui, s.expo_power, &mut self.config.steering_expo, 0.5..=3.0);
-        slider_f64(ui, s.filter_alpha, &mut self.config.steering_filter_alpha, 0.0..=1.0);
-        slider_f64(ui, s.self_center_strength, &mut self.config.steering_spring_strength, 0.0..=1.0);
+        slider_f64(
+            ui,
+            s.filter_alpha,
+            &mut self.config.steering_filter_alpha,
+            0.0..=1.0,
+        );
+        slider_f64(
+            ui,
+            s.self_center_strength,
+            &mut self.config.steering_spring_strength,
+            0.0..=1.0,
+        );
     }
 
     fn draw_throttle_tab(&mut self, ui: &mut egui::Ui, s: &Strings) {
-        slider_f64(ui, s.cut_start, &mut self.config.throttle_cut_start, 0.0..=0.5);
+        slider_f64(
+            ui,
+            s.cut_start,
+            &mut self.config.throttle_cut_start,
+            0.0..=0.5,
+        );
         slider_f64(ui, s.cut_max, &mut self.config.throttle_cut_max, 0.3..=1.0);
-        slider_f64(ui, s.min_at_full_lock, &mut self.config.throttle_min_cut_at_full, 0.3..=0.95);
+        slider_f64(
+            ui,
+            s.min_at_full_lock,
+            &mut self.config.throttle_min_cut_at_full,
+            0.3..=0.95,
+        );
         slider_i32(ui, s.ramp_ms, &mut self.config.throttle_ramp_ms, 10..=1000);
         slider_i32(ui, s.drop_ms, &mut self.config.throttle_drop_ms, 5..=200);
-        slider_f64(ui, s.curve_power, &mut self.config.throttle_curve_exp, 0.5..=4.0);
+        slider_f64(
+            ui,
+            s.curve_power,
+            &mut self.config.throttle_curve_exp,
+            0.5..=4.0,
+        );
     }
 
     fn draw_brake_tab(&mut self, ui: &mut egui::Ui, s: &Strings) {
-        slider_f64(ui, s.min_ratio_base, &mut self.config.brake_min_ratio_base, 0.0..=1.0);
-        slider_f64(ui, s.min_ratio_max, &mut self.config.brake_min_ratio_max, 0.0..=1.0);
-        slider_f64(ui, s.brake_curve_power, &mut self.config.brake_curve_exp, 0.5..=4.0);
+        slider_f64(
+            ui,
+            s.min_ratio_base,
+            &mut self.config.brake_min_ratio_base,
+            0.0..=1.0,
+        );
+        slider_f64(
+            ui,
+            s.min_ratio_max,
+            &mut self.config.brake_min_ratio_max,
+            0.0..=1.0,
+        );
+        slider_f64(
+            ui,
+            s.brake_curve_power,
+            &mut self.config.brake_curve_exp,
+            0.5..=4.0,
+        );
         ui.checkbox(&mut self.config.brake_trail_enabled, s.dynamic_minimum);
         slider_i32(ui, s.hold_ms, &mut self.config.brake_hold_ms, 100..=3000);
-        slider_i32(ui, s.release_total_ms, &mut self.config.brake_release_total_ms, 200..=5000);
-        slider_f64(ui, s.release_accel_power, &mut self.config.brake_release_accel_exp, 0.5..=4.0);
-        slider_i32(ui, s.fast_apply_ms, &mut self.config.brake_fast_apply_ms, 1..=200);
-        slider_i32(ui, s.fast_release_ms, &mut self.config.brake_fast_release_ms, 10..=500);
-        slider_f64(ui, s.post_hold_ratio, &mut self.config.brake_after_release_hold_ratio, 0.0..=0.5);
-        slider_i32(ui, s.post_hold_ms, &mut self.config.brake_after_release_hold_ms, 0..=3000);
+        slider_i32(
+            ui,
+            s.release_total_ms,
+            &mut self.config.brake_release_total_ms,
+            200..=5000,
+        );
+        slider_f64(
+            ui,
+            s.release_accel_power,
+            &mut self.config.brake_release_accel_exp,
+            0.5..=4.0,
+        );
+        slider_i32(
+            ui,
+            s.fast_apply_ms,
+            &mut self.config.brake_fast_apply_ms,
+            1..=200,
+        );
+        slider_i32(
+            ui,
+            s.fast_release_ms,
+            &mut self.config.brake_fast_release_ms,
+            10..=500,
+        );
+        slider_f64(
+            ui,
+            s.post_hold_ratio,
+            &mut self.config.brake_after_release_hold_ratio,
+            0.0..=0.5,
+        );
+        slider_i32(
+            ui,
+            s.post_hold_ms,
+            &mut self.config.brake_after_release_hold_ms,
+            0..=3000,
+        );
     }
 
     fn draw_general_tab(&mut self, ui: &mut egui::Ui, s: &Strings) {
-        slider_i32(ui, s.update_interval_ms, &mut self.config.thread_interval_ms, 1..=20);
-        if ui.checkbox(&mut self.config.input_sink_enabled, s.background_capture).changed() {
+        slider_i32(
+            ui,
+            s.update_interval_ms,
+            &mut self.config.thread_interval_ms,
+            1..=20,
+        );
+        if ui
+            .checkbox(&mut self.config.input_sink_enabled, s.background_capture)
+            .changed()
+        {
             self.sync_globals_from_config();
         }
         ui.checkbox(&mut self.config.exit_on_close, s.exit_on_close);
@@ -263,16 +383,28 @@ impl MouseDriveApp {
 
 // --- Slider yardimlari ---
 
-fn slider_f64(ui: &mut egui::Ui, label: &str, val: &mut f64, range: std::ops::RangeInclusive<f64>) -> bool {
+fn slider_f64(
+    ui: &mut egui::Ui,
+    label: &str,
+    val: &mut f64,
+    range: std::ops::RangeInclusive<f64>,
+) -> bool {
     ui.horizontal(|ui| {
         ui.label(label);
         ui.add(egui::Slider::new(val, range)).changed()
-    }).inner
+    })
+    .inner
 }
 
-fn slider_i32(ui: &mut egui::Ui, label: &str, val: &mut i32, range: std::ops::RangeInclusive<i32>) -> bool {
+fn slider_i32(
+    ui: &mut egui::Ui,
+    label: &str,
+    val: &mut i32,
+    range: std::ops::RangeInclusive<i32>,
+) -> bool {
     ui.horizontal(|ui| {
         ui.label(label);
         ui.add(egui::Slider::new(val, range)).changed()
-    }).inner
+    })
+    .inner
 }
