@@ -9,6 +9,10 @@ MouseDrive is a Windows application that converts mouse and keyboard input into 
 
 [Old C++ version](https://github.com/Toxpox/MouseDrive-old-cpp)
 
+<p align="center">
+  <img src="MouseDrive/image/MainPage.png" width="700"/>
+</p>
+
 ## Download
 
 **[Download latest release](https://github.com/Toxpox/MouseDrive/releases/latest)**
