@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 /// UI localization.
 /// Language: 0 = Turkce, 1 = English
 
@@ -91,6 +93,19 @@ pub struct Strings {
     pub background_capture: &'static str,
     pub exit_on_close: &'static str,
     pub language: &'static str,
+
+    // vjoy status
+    pub vjoy_connected: &'static str,
+    pub vjoy_dll_not_found: &'static str,
+    pub vjoy_driver_disabled: &'static str,
+    pub vjoy_device_busy: &'static str,
+    pub vjoy_device_missing: &'static str,
+    pub vjoy_acquire_failed: &'static str,
+    pub vjoy_unknown: &'static str,
+
+    // config validation (v0.5+ UI'da kullanilacak)
+    #[allow(dead_code)]
+    pub config_corrected: &'static str,
 }
 
 static TR: Strings = Strings {
@@ -153,6 +168,16 @@ static TR: Strings = Strings {
     background_capture: "Odak Disi Yakalama",
     exit_on_close: "Kapatinca Cik",
     language: "Dil:",
+
+    vjoy_connected: "vJoy baglandi \u{2713}",
+    vjoy_dll_not_found: "vJoyInterface.dll bulunamadi! vJoy yuklu degil.",
+    vjoy_driver_disabled: "vJoy surucusu etkin degil!",
+    vjoy_device_busy: "vJoy cihazi baska uygulama tarafindan kullaniliyor.",
+    vjoy_device_missing: "vJoy cihazi bulunamadi. vJoy Configure'dan etkinlestirin.",
+    vjoy_acquire_failed: "vJoy cihazi alinamadi!",
+    vjoy_unknown: "vJoy bilinmeyen hata.",
+
+    config_corrected: "Config: {} parametre duzeltildi.",
 };
 
 static EN: Strings = Strings {
@@ -215,6 +240,16 @@ static EN: Strings = Strings {
     background_capture: "Background Capture",
     exit_on_close: "Exit on Close",
     language: "Language:",
+
+    vjoy_connected: "vJoy connected \u{2713}",
+    vjoy_dll_not_found: "vJoyInterface.dll not found! vJoy is not installed.",
+    vjoy_driver_disabled: "vJoy driver is not enabled!",
+    vjoy_device_busy: "vJoy device is in use by another application.",
+    vjoy_device_missing: "vJoy device not found. Enable it in vJoy Configure.",
+    vjoy_acquire_failed: "Failed to acquire vJoy device!",
+    vjoy_unknown: "vJoy unknown error.",
+
+    config_corrected: "Config: {} parameter(s) corrected.",
 };
 
 pub fn strings(lang: Lang) -> &'static Strings {
