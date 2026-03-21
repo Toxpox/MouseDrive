@@ -1,8 +1,8 @@
 use libloading::Library;
 
-pub const HID_USAGE_X: u32 = 0x30;   // direksiyon
-pub const HID_USAGE_Y: u32 = 0x31;   // gaz
-pub const HID_USAGE_RZ: u32 = 0x35;  // fren
+pub const HID_USAGE_X: u32 = 0x30; // direksiyon
+pub const HID_USAGE_Y: u32 = 0x31; // gaz
+pub const HID_USAGE_RZ: u32 = 0x35; // fren
 
 pub const AXIS_MAX: i32 = 32767;
 pub const AXIS_MIN: i32 = 0;
@@ -10,16 +10,33 @@ pub const AXIS_CENTER: i32 = 16383;
 
 #[repr(u32)]
 #[derive(Debug, PartialEq)]
-pub enum VjdStat { Own = 0, Free = 1, Busy = 2, Miss = 3, Unkn = 4 }
+pub enum VjdStat {
+    Own = 0,
+    Free = 1,
+    Busy = 2,
+    Miss = 3,
+    Unkn = 4,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum VJoyStatus {
+    Connected,
+    DllNotFound,
+    DriverDisabled,
+    DeviceBusy,
+    DeviceMissing,
+    AcquireFailed,
+    Unknown,
+}
 
 // vJoy SDK fonksiyonlari __cdecl kullaniyor (x64'te fark etmez ama dogrusu bu)
-type FnVJoyEnabled   = unsafe extern "C" fn() -> bool;
-type FnGetVJDStatus  = unsafe extern "C" fn(u32) -> u32;
-type FnAcquireVJD    = unsafe extern "C" fn(u32) -> bool;
+type FnVJoyEnabled = unsafe extern "C" fn() -> bool;
+type FnGetVJDStatus = unsafe extern "C" fn(u32) -> u32;
+type FnAcquireVJD = unsafe extern "C" fn(u32) -> bool;
 type FnRelinquishVJD = unsafe extern "C" fn(u32);
-type FnSetAxis       = unsafe extern "C" fn(i32, u32, u32) -> bool;
-type FnSetBtn        = unsafe extern "C" fn(bool, u32, u8) -> bool;
-type FnResetVJD      = unsafe extern "C" fn(u32) -> bool;
+type FnSetAxis = unsafe extern "C" fn(i32, u32, u32) -> bool;
+type FnSetBtn = unsafe extern "C" fn(bool, u32, u8) -> bool;
+type FnResetVJD = unsafe extern "C" fn(u32) -> bool;
 
 pub struct VJoyApi {
     _lib: Library,
@@ -32,39 +49,77 @@ pub struct VJoyApi {
     reset_vjd: FnResetVJD,
 }
 
+/// Bilinen konumlarda vJoyInterface.dll'i arar.
+/// Bulamazsa None doner ve load() standard PATH aramasina duser.
+fn find_vjoy_dll() -> Option<std::path::PathBuf> {
+    // 1. Exe dizini (portable — DLL exe'nin yaninda)
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        let path = dir.join("vJoyInterface.dll");
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    // 2. Standard vJoy kurulum yolu (x64)
+    if let Ok(pf) = std::env::var("ProgramFiles") {
+        let path = std::path::PathBuf::from(&pf)
+            .join("vJoy")
+            .join("x64")
+            .join("vJoyInterface.dll");
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    None
+}
+
 impl VJoyApi {
+    #[allow(clippy::missing_transmute_annotations)]
     pub fn load() -> Option<Self> {
         unsafe {
-            let lib = Library::new("vJoyInterface.dll").ok()?;
+            // Oncelikle bilinen guvenli konumlardan yukle (DLL hijacking koruması)
+            let lib = if let Some(path) = find_vjoy_dll() {
+                Library::new(path).ok()?
+            } else {
+                // Fallback: standard DLL arama sirasi (System32, PATH vs.)
+                Library::new("vJoyInterface.dll").ok()?
+            };
 
-            // lib'den symbol cek, transmute ile fn pointer'a cevir.
-            // lib alive kaldigi surece pointer'lar gecerli.
             macro_rules! sym {
                 ($name:literal, $ty:ty) => {
-                    std::mem::transmute::<_, $ty>(
-                        lib.get::<$ty>($name).ok()?.into_raw().into_raw()
-                    )
+                    std::mem::transmute::<_, $ty>(lib.get::<$ty>($name).ok()?.into_raw().into_raw())
                 };
             }
 
             let api = Self {
-                vjoy_enabled:   sym!(b"vJoyEnabled",   FnVJoyEnabled),
-                get_vjd_status: sym!(b"GetVJDStatus",  FnGetVJDStatus),
-                acquire_vjd:    sym!(b"AcquireVJD",    FnAcquireVJD),
+                vjoy_enabled: sym!(b"vJoyEnabled", FnVJoyEnabled),
+                get_vjd_status: sym!(b"GetVJDStatus", FnGetVJDStatus),
+                acquire_vjd: sym!(b"AcquireVJD", FnAcquireVJD),
                 relinquish_vjd: sym!(b"RelinquishVJD", FnRelinquishVJD),
-                set_axis:       sym!(b"SetAxis",       FnSetAxis),
-                set_btn:        sym!(b"SetBtn",        FnSetBtn),
-                reset_vjd:      sym!(b"ResetVJD",      FnResetVJD),
+                set_axis: sym!(b"SetAxis", FnSetAxis),
+                set_btn: sym!(b"SetBtn", FnSetBtn),
+                reset_vjd: sym!(b"ResetVJD", FnResetVJD),
                 _lib: lib,
             };
             Some(api)
         }
     }
 
-    pub fn is_enabled(&self) -> bool         { unsafe { (self.vjoy_enabled)() } }
-    pub fn acquire(&self, dev: u32) -> bool   { unsafe { (self.acquire_vjd)(dev) } }
-    pub fn relinquish(&self, dev: u32)        { unsafe { (self.relinquish_vjd)(dev) } }
-    pub fn reset(&self, dev: u32) -> bool     { unsafe { (self.reset_vjd)(dev) } }
+    pub fn is_enabled(&self) -> bool {
+        unsafe { (self.vjoy_enabled)() }
+    }
+    pub fn acquire(&self, dev: u32) -> bool {
+        unsafe { (self.acquire_vjd)(dev) }
+    }
+    pub fn relinquish(&self, dev: u32) {
+        unsafe { (self.relinquish_vjd)(dev) }
+    }
+    pub fn reset(&self, dev: u32) -> bool {
+        unsafe { (self.reset_vjd)(dev) }
+    }
 
     pub fn set_axis(&self, val: i32, dev: u32, usage: u32) -> bool {
         unsafe { (self.set_axis)(val, dev, usage) }
@@ -75,8 +130,10 @@ impl VJoyApi {
 
     pub fn get_status(&self, dev: u32) -> VjdStat {
         match unsafe { (self.get_vjd_status)(dev) } {
-            0 => VjdStat::Own,  1 => VjdStat::Free,
-            2 => VjdStat::Busy, 3 => VjdStat::Miss,
+            0 => VjdStat::Own,
+            1 => VjdStat::Free,
+            2 => VjdStat::Busy,
+            3 => VjdStat::Miss,
             _ => VjdStat::Unkn,
         }
     }
