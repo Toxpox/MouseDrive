@@ -1,4 +1,4 @@
-# MouseDrive (Rust) — v0.3.0-a
+# MouseDrive (Rust) — v0.4.0
 
 [![Platform](https://img.shields.io/badge/platform-Windows-0078D6)](#requirements)
 [![Language](https://img.shields.io/badge/language-Rust-black)](#build)
@@ -8,10 +8,6 @@
 MouseDrive is a Windows application that converts mouse and keyboard input into virtual joystick signals via [vJoy](https://github.com/BrunnerInnovation/vJoy), designed for racing simulators.
 
 [Old C++ version](https://github.com/Toxpox/MouseDrive-old-cpp)
-
-<p align="center">
-  <img src="MouseDrive/image/MainPage.png" width="700"/>
-</p>
 
 ## Download
 
@@ -51,7 +47,7 @@ Or browse all versions at [Releases](https://github.com/Toxpox/MouseDrive/releas
 ## Quick start
 
 1. Install [vJoy](https://github.com/BrunnerInnovation/vJoy) and create a device with **X / Y / Rz** axes and **2 buttons** enabled (Device 1).
-2. Make sure `vJoyInterface.dll` is accessible (next to the executable or in your `PATH`).
+2. `vJoyInterface.dll` is searched automatically (exe directory → Program Files → PATH).
 3. Run [Executable MouseDrive](https://github.com/Toxpox/MouseDrive/releases/latest).
 4. Bind your game to the vJoy device axes.
 
@@ -66,7 +62,7 @@ Or browse all versions at [Releases](https://github.com/Toxpox/MouseDrive/releas
 - Windows 10/11
 - [Executable MouseDrive](https://github.com/Toxpox/MouseDrive/releases/latest)
 - [vJoy Driver**](https://github.com/BrunnerInnovation/vJoy) installed and enabled
-- `vJoyInterface.dll` available (next to exe or in `PATH`)
+- `vJoyInterface.dll` available (next to exe, Program Files, or in `PATH`)
 
 >  ** Tested with V2.2.2.0
 
@@ -108,7 +104,7 @@ MouseDrive/
 
 | Problem | Solution |
 |---------|----------|
-| "vJoyInterface.dll not found" | Place the DLL next to the exe or add its folder to `PATH` |
+| "vJoyInterface.dll not found" | Place the DLL next to the exe, in `Program Files\Shaul\vJoy\x64`, or add its folder to `PATH` |
 | "vJoy not enabled" | Check that vJoy driver is installed and the service is running |
 | "vJoy device busy" | Another application is using Device 1 — close it or use a different device |
 | Mouse not captured | Press **F8** to toggle input capture |
