@@ -1,11 +1,11 @@
 #![windows_subsystem = "windows"]
 
-mod vjoy;
 mod config;
 mod input;
-mod logic;
 mod lang;
+mod logic;
 mod ui;
+mod vjoy;
 
 use std::ffi::c_void;
 use std::sync::atomic::Ordering;
@@ -13,20 +13,30 @@ use std::time::Instant;
 
 use eframe::egui;
 use windows::Win32::Foundation::HWND;
+use windows::Win32::Media::{timeBeginPeriod, timeEndPeriod};
+use windows::Win32::System::Threading::{
+    GetCurrentProcess, PROCESS_CREATION_FLAGS, SetPriorityClass,
+};
 
-use crate::vjoy::{VJoyApi, VjdStat, AXIS_CENTER, AXIS_MAX, AXIS_MIN, HID_USAGE_X, HID_USAGE_Y, HID_USAGE_RZ};
 use crate::config::{Config, get_config_path};
 use crate::input::*;
 use crate::logic::*;
+use crate::vjoy::{
+    AXIS_CENTER, AXIS_MAX, AXIS_MIN, HID_USAGE_RZ, HID_USAGE_X, HID_USAGE_Y, VJoyApi, VJoyStatus,
+    VjdStat,
+};
+
+// --- MouseDrive uygulamasi ---
 
 pub(crate) struct MouseDriveApp {
     pub(crate) config: Config,
     pub(crate) state: MouseDriveState,
     pub(crate) vjoy: Option<VJoyApi>,
     pub(crate) device_id: u32,
-    pub(crate) vjoy_status: String,
+    pub(crate) vjoy_status: VJoyStatus,
     pub(crate) settings_panel_open: bool,
     pub(crate) settings_tab: u8,
+    pub(crate) title: String,
     _raw_input_handle: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -34,13 +44,16 @@ impl MouseDriveApp {
     pub(crate) fn new(cc: &eframe::CreationContext<'_>) -> Self {
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
 
-        let config = get_config_path()
+        let mut config = get_config_path()
             .and_then(|p| Config::load_from_file(&p))
             .unwrap_or_default();
 
+        // Config dogrulama: sinir disi degerleri clamp et
+        let _corrected = config.validate();
+
         // global state'i config ile senkronize et
-        INPUT_SINK_ENABLED.store(config.input_sink_enabled, Ordering::SeqCst);
-        MOUSE_DELTA_CAP.store(config.mouse_delta_cap, Ordering::SeqCst);
+        INPUT_SINK_ENABLED.store(config.input_sink_enabled, Ordering::Release);
+        MOUSE_DELTA_CAP.store(config.mouse_delta_cap, Ordering::Release);
         store_dpi_scale(config.mouse_dpi_scale);
 
         let raw_input_handle = start_raw_input_thread();
@@ -54,30 +67,34 @@ impl MouseDriveApp {
             vjoy_status,
             settings_panel_open: true,
             settings_tab: 0,
+            title: format!("MouseDrive v{}", env!("CARGO_PKG_VERSION")),
             _raw_input_handle: Some(raw_input_handle),
         }
     }
 
     /// vJoy baglantisini kur veya yeniden kur
-    fn connect_vjoy(device_id: u32) -> (Option<VJoyApi>, String) {
+    fn connect_vjoy(device_id: u32) -> (Option<VJoyApi>, VJoyStatus) {
         match VJoyApi::load() {
             Some(api) => {
                 if !api.is_enabled() {
-                    return (None, "vJoy driver etkin degil!".into());
+                    return (None, VJoyStatus::DriverDisabled);
                 }
                 let status = api.get_status(device_id);
-                if status == VjdStat::Free || status == VjdStat::Own {
-                    if api.acquire(device_id) {
-                        api.reset(device_id);
-                        (Some(api), "vJoy baglandi \u{2713}".into())
-                    } else {
-                        (None, "vJoy device alinamadi!".into())
+                match status {
+                    VjdStat::Free | VjdStat::Own => {
+                        if api.acquire(device_id) {
+                            api.reset(device_id);
+                            (Some(api), VJoyStatus::Connected)
+                        } else {
+                            (None, VJoyStatus::AcquireFailed)
+                        }
                     }
-                } else {
-                    (None, format!("vJoy kullanilamaz: {:?}", status))
+                    VjdStat::Busy => (None, VJoyStatus::DeviceBusy),
+                    VjdStat::Miss => (None, VJoyStatus::DeviceMissing),
+                    _ => (None, VJoyStatus::Unknown),
                 }
             }
-            None => (None, "vJoyInterface.dll bulunamadi!".into()),
+            None => (None, VJoyStatus::DllNotFound),
         }
     }
 
@@ -104,7 +121,7 @@ impl MouseDriveApp {
         self.state.capture_key_prev = key_pressed;
 
         // orta tik -> direksiyon sifirla
-        if MIDDLE_BUTTON_CLICKED.swap(false, Ordering::SeqCst) {
+        if MIDDLE_BUTTON_CLICKED.swap(false, Ordering::Acquire) {
             self.state.steering = 0.0;
             self.state.steering_filtered = 0.0;
         }
@@ -129,9 +146,9 @@ impl MouseDriveApp {
     }
 
     fn reset_state(&mut self) {
-        LEFT_BUTTON.store(false, Ordering::SeqCst);
-        RIGHT_BUTTON.store(false, Ordering::SeqCst);
-        MOUSE_DELTA_X.store(0, Ordering::SeqCst);
+        LEFT_BUTTON.store(false, Ordering::Release);
+        RIGHT_BUTTON.store(false, Ordering::Release);
+        MOUSE_DELTA_X.store(0, Ordering::Relaxed);
         self.state.steering = 0.0;
         self.state.steering_filtered = 0.0;
         self.state.throttle = 0.0;
@@ -146,7 +163,10 @@ impl MouseDriveApp {
     fn send_to_vjoy(&self) {
         let Some(ref vjoy) = self.vjoy else { return };
 
-        let safe_steering = self.state.steering_filtered.clamp(-STEERING_RANGE, STEERING_RANGE);
+        let safe_steering = self
+            .state
+            .steering_filtered
+            .clamp(-STEERING_RANGE, STEERING_RANGE);
         let steer_axis = (AXIS_CENTER + safe_steering.round() as i32).clamp(AXIS_MIN, AXIS_MAX);
         let throttle_axis = (self.state.throttle * AXIS_MAX as f64).round() as i32;
         let brake_axis = (self.state.brake * AXIS_MAX as f64).round() as i32;
@@ -159,8 +179,8 @@ impl MouseDriveApp {
     }
 
     pub(crate) fn sync_globals_from_config(&self) {
-        INPUT_SINK_ENABLED.store(self.config.input_sink_enabled, Ordering::SeqCst);
-        MOUSE_DELTA_CAP.store(self.config.mouse_delta_cap, Ordering::SeqCst);
+        INPUT_SINK_ENABLED.store(self.config.input_sink_enabled, Ordering::Release);
+        MOUSE_DELTA_CAP.store(self.config.mouse_delta_cap, Ordering::Release);
         store_dpi_scale(self.config.mouse_dpi_scale);
 
         let hwnd = RAW_INPUT_HWND.load(Ordering::SeqCst);
@@ -171,6 +191,18 @@ impl MouseDriveApp {
 }
 
 fn main() -> eframe::Result<()> {
+    // Yuksek cozunurluklu zamanlayici: Windows 15.6ms -> 1ms
+    // thread::sleep(4ms) gercekten 4ms bekler, 15ms degil
+    unsafe {
+        timeBeginPeriod(1);
+    }
+
+    // Proses onceligi: HIGH_PRIORITY_CLASS (0x80)
+    // Windows scheduler bu prosesi normal proseslerin onune alir
+    unsafe {
+        let _ = SetPriorityClass(GetCurrentProcess(), PROCESS_CREATION_FLAGS(0x80));
+    }
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1000.0, 620.0])
@@ -179,9 +211,16 @@ fn main() -> eframe::Result<()> {
         ..Default::default()
     };
 
-    eframe::run_native(
+    let result = eframe::run_native(
         "MouseDrive",
         options,
         Box::new(|cc| Ok(Box::new(MouseDriveApp::new(cc)))),
-    )
+    );
+
+    // HPET geri al
+    unsafe {
+        timeEndPeriod(1);
+    }
+
+    result
 }
