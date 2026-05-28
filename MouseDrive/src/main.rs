@@ -129,13 +129,10 @@ impl MouseDriveApp {
         self.state.w_key_pressed = is_key_down(0x57); // W
         self.state.s_key_pressed = is_key_down(0x53); // S
 
-        let safe_interval = self.config.thread_interval_ms.max(1) as f64;
-        let time_scale = (delta_ms / safe_interval).clamp(0.5, 2.0);
-
         if self.state.capture_enabled {
             self.state.update_steering(&self.config, delta_ms);
-            self.state.update_throttle(&self.config, time_scale);
-            self.state.update_brake(&self.config, now, time_scale);
+            self.state.update_throttle(&self.config, delta_ms);
+            self.state.update_brake(&self.config, delta_ms);
         } else {
             self.state.steering_filtered = 0.0;
             self.state.throttle = 0.0;
@@ -153,8 +150,11 @@ impl MouseDriveApp {
         self.state.steering_filtered = 0.0;
         self.state.throttle = 0.0;
         self.state.throttle_target = 0.0;
+        self.state.throttle_t = 0.0;
+        self.state.throttle_press_active = false;
         self.state.brake = 0.0;
-        self.state.brake_state = BrakeState::Idle;
+        self.state.brake_t = 0.0;
+        self.state.brake_press_active = false;
         if let Some(ref vjoy) = self.vjoy {
             vjoy.reset(self.device_id);
         }

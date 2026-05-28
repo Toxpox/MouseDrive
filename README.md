@@ -1,6 +1,5 @@
-# MouseDrive (Rust) — v0.4.0
+# MouseDrive (Rust) — Beta Branch
 
-[![Platform](https://img.shields.io/badge/platform-Windows-0078D6)](#requirements)
 [![Language](https://img.shields.io/badge/language-Rust-black)](#build)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FToxpox%2FMouseDrive.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FToxpox%2FMouseDrive?ref=badge_shield)
@@ -21,20 +20,6 @@ Or browse all versions at [Releases](https://github.com/Toxpox/MouseDrive/releas
 
 > Extract the `.zip`, place `vJoyInterface.dll` next to `mousedrive.exe`, and run.
 
-## Features
-
-- **Steering** — Mouse X movement mapped to vJoy X axis with 4 modes (linear, expo*, filtered*, self-centering)
-- **Throttle** — Left mouse button with configurable ramp/drop curves
-- **Brake** — Right mouse button with full state machine (press, hold, release)
-- **Gear buttons** — W/S keys mapped to vJoy buttons 1/2
-- **Live dashboard** — Real-time progress bars for steering, throttle, brake
-- **Tabbed settings panel** — Collapsible side panel with per-category tuning
-- **Config persistence** — TOML-based config with load/save/reset
-- **Raw input capture** — Works even when the window is not focused (F8 toggle)
-- **Lock-free architecture** — Atomic globals between raw input thread and GUI thread
-- **Language support** — Turkish and English UI (switchable in Settings > General)
-
-> *Experimental
 
 ## Input / Output mapping
 
@@ -48,19 +33,6 @@ Or browse all versions at [Releases](https://github.com/Toxpox/MouseDrive/releas
 | Middle click | — | Reset steering |
 | F8 | — | Toggle input capture |
 
-## Quick start
-
-1. Install [vJoy](https://github.com/BrunnerInnovation/vJoy) and create a device with **X / Y / Rz** axes and **2 buttons** enabled (Device 1).
-2. `vJoyInterface.dll` is searched automatically (exe directory → Program Files → PATH).
-3. Run [Executable MouseDrive](https://github.com/Toxpox/MouseDrive/releases/latest).
-4. Bind your game to the vJoy device axes.
-
-## How it works
-
-- **Raw input thread** — Dedicated thread with a hidden window that receives `WM_INPUT` messages for mouse deltas and button states.
-- **Atomic communication** — `AtomicI64`, `AtomicBool`, `AtomicU64` for zero-lock data transfer between threads.
-- **GUI thread** — eframe/egui loop that reads atomics, runs control logic, updates vJoy, and renders the UI.
-
 ## Requirements
 
 - Windows 10/11
@@ -69,40 +41,6 @@ Or browse all versions at [Releases](https://github.com/Toxpox/MouseDrive/releas
 - `vJoyInterface.dll` available (next to exe, Program Files, or in `PATH`)
 
 >  ** Tested with V2.2.2.0
-
-## Build
-
-```powershell
-cargo build
-
-cargo build --release
-```
-
-
-## Configuration
-
-Settings are stored in TOML format. The config file is loaded from:
-
-1. `<exe_directory>/config.toml` (portable mode)
-2. `%APPDATA%\MouseDrive\config.toml` (standard)
-
-Use the **Save** / **Load** / **Default** buttons in the settings panel, or edit the file manually.
-
-## Project layout
-
-```
-MouseDrive/
-├── src/
-│   ├── main.rs      # App struct, entry point, vJoy connection
-│   ├── config.rs    # Config struct, TOML load/save, path resolution
-│   ├── input.rs     # Raw input thread, atomic globals, key helpers
-│   ├── logic.rs     # Steering/throttle/brake state machine & math
-│   ├── ui.rs        # egui UI (side panel, tabs, dashboard)
-│   └── vjoy.rs      # vJoy FFI (runtime DLL loading, axis/button API)
-├── Cargo.toml
-├── LICENSE
-└── README.md
-```
 
 ## Troubleshooting
 

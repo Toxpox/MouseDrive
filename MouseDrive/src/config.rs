@@ -25,33 +25,34 @@ pub struct Config {
     pub steering_saturation: f64,
     pub steering_spring_strength: f64,
 
-    // gaz
+    // gaz - direksiyon-tabanli ust kesim
     pub throttle_curve_exp: f64,
     pub throttle_min_cut_at_full: f64,
     pub throttle_cut_start: f64,
     pub throttle_cut_max: f64,
-    pub throttle_ramp_ms: i32,
-    pub throttle_drop_ms: i32,
+    // gaz - direksiyon merkez uzakligina gore artis hizi
+    pub throttle_steer_rate_min: f64,
+    pub throttle_steer_rate_threshold: f64,
+    // gaz - tam yasam dongusu egrisi (7 nokta; X[0]=0, X[3]=0.5, X[6]=1 sabit)
+    pub throttle_lifecycle_xs: [f64; 7],
+    pub throttle_lifecycle_ys: [f64; 7],
+    pub throttle_lifecycle_ms: i32, // tam dongu suresi
 
-    // fren
-    pub brake_fast_apply_ms: i32,
-    pub brake_hold_ms: i32,
-    pub brake_release_total_ms: i32,
-    pub brake_release_accel_exp: f64,
-    pub brake_fast_release_ms: i32,
-    pub brake_tap_ms: i32,
+    // fren - sekillendirme (trail-braking)
     pub brake_min_ratio_base: f64,
     pub brake_min_ratio_max: f64,
     pub brake_curve_exp: f64,
     pub brake_trail_enabled: bool,
-    pub brake_after_release_hold_ratio: f64,
-    pub brake_after_release_hold_ms: i32,
+    // fren - tam yasam dongusu egrisi (7 nokta; X[0]=0, X[3]=0.5, X[6]=1 sabit)
+    pub brake_lifecycle_xs: [f64; 7],
+    pub brake_lifecycle_ys: [f64; 7],
+    pub brake_lifecycle_ms: i32,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            config_version: 1,
+            config_version: 2,
 
             thread_interval_ms: 4,
             input_sink_enabled: true,
@@ -73,21 +74,20 @@ impl Default for Config {
             throttle_min_cut_at_full: 0.70,
             throttle_cut_start: 0.19,
             throttle_cut_max: 0.8,
-            throttle_ramp_ms: 75,
-            throttle_drop_ms: 25,
+            throttle_steer_rate_min: 0.30,
+            throttle_steer_rate_threshold: 0.55,
+            // [0..3] = press fazi, [3..6] = release fazi (X[3]=0.5 sabit)
+            throttle_lifecycle_xs: [0.00, 0.15, 0.35, 0.50, 0.65, 0.85, 1.00],
+            throttle_lifecycle_ys: [0.00, 0.50, 0.85, 1.00, 0.95, 0.40, 0.00],
+            throttle_lifecycle_ms: 500,
 
-            brake_fast_apply_ms: 10,
-            brake_hold_ms: 1750,
-            brake_release_total_ms: 2500,
-            brake_release_accel_exp: 1.7,
-            brake_fast_release_ms: 65,
-            brake_tap_ms: 120,
             brake_min_ratio_base: 0.40,
             brake_min_ratio_max: 0.55,
             brake_curve_exp: 2.0,
             brake_trail_enabled: false,
-            brake_after_release_hold_ratio: 0.06,
-            brake_after_release_hold_ms: 500,
+            brake_lifecycle_xs: [0.00, 0.10, 0.30, 0.50, 0.70, 0.85, 1.00],
+            brake_lifecycle_ys: [0.00, 0.60, 0.90, 1.00, 0.45, 0.10, 0.00],
+            brake_lifecycle_ms: 3500,
         }
     }
 }
@@ -151,24 +151,78 @@ impl Config {
         v_f!(throttle_min_cut_at_full, 0.3, 0.95);
         v_f!(throttle_cut_start, 0.0, 0.5);
         v_f!(throttle_cut_max, 0.3, 1.0);
-        v_i!(throttle_ramp_ms, 10, 1000);
-        v_i!(throttle_drop_ms, 5, 200);
+        v_f!(throttle_steer_rate_min, 0.0, 1.0);
+        v_f!(throttle_steer_rate_threshold, 0.05, 1.0);
+        v_i!(throttle_lifecycle_ms, 50, 3000);
+        corrected += sanitize_lifecycle_curve(
+            &mut self.throttle_lifecycle_xs,
+            &mut self.throttle_lifecycle_ys,
+        );
 
         // fren
-        v_i!(brake_fast_apply_ms, 1, 200);
-        v_i!(brake_hold_ms, 100, 3000);
-        v_i!(brake_release_total_ms, 200, 5000);
-        v_f!(brake_release_accel_exp, 0.5, 4.0);
-        v_i!(brake_fast_release_ms, 10, 500);
-        v_i!(brake_tap_ms, 10, 500);
         v_f!(brake_min_ratio_base, 0.0, 1.0);
         v_f!(brake_min_ratio_max, 0.0, 1.0);
         v_f!(brake_curve_exp, 0.5, 4.0);
-        v_f!(brake_after_release_hold_ratio, 0.0, 0.5);
-        v_i!(brake_after_release_hold_ms, 0, 3000);
+        v_i!(brake_lifecycle_ms, 200, 8000);
+        corrected += sanitize_lifecycle_curve(
+            &mut self.brake_lifecycle_xs,
+            &mut self.brake_lifecycle_ys,
+        );
 
         corrected
     }
+}
+
+/// 7-noktali tam yasam dongusu egrisi:
+/// - X[0]=0, X[3]=0.5, X[6]=1 sabit (press/release sinirlari)
+/// - X[1], X[2] press zonu icinde (0 < X < 0.5), artan
+/// - X[4], X[5] release zonu icinde (0.5 < X < 1), artan
+/// - Y degerleri 0..1 araliginda
+pub fn sanitize_lifecycle_curve(xs: &mut [f64; 7], ys: &mut [f64; 7]) -> u32 {
+    let mut corrected = 0u32;
+    for v in xs.iter_mut().chain(ys.iter_mut()) {
+        if v.is_nan() || v.is_infinite() {
+            *v = 0.0;
+            corrected += 1;
+        }
+    }
+    // sabit X noktalari
+    for (i, x) in [(0usize, 0.0), (3, 0.5), (6, 1.0)] {
+        if (xs[i] - x).abs() > 1e-9 {
+            xs[i] = x;
+            corrected += 1;
+        }
+    }
+    // press zonu (idx 1, 2): (0, 0.5) arasi artan
+    let press_lo = 1e-3;
+    let press_hi = 0.5 - 1e-3;
+    if xs[1] < press_lo || xs[1] > press_hi {
+        xs[1] = xs[1].clamp(press_lo, press_hi);
+        corrected += 1;
+    }
+    if xs[2] < xs[1] + 1e-3 || xs[2] > press_hi {
+        xs[2] = (xs[1] + 1e-3).clamp(press_lo, press_hi);
+        corrected += 1;
+    }
+    // release zonu (idx 4, 5): (0.5, 1) arasi artan
+    let rel_lo = 0.5 + 1e-3;
+    let rel_hi = 1.0 - 1e-3;
+    if xs[4] < rel_lo || xs[4] > rel_hi {
+        xs[4] = xs[4].clamp(rel_lo, rel_hi);
+        corrected += 1;
+    }
+    if xs[5] < xs[4] + 1e-3 || xs[5] > rel_hi {
+        xs[5] = (xs[4] + 1e-3).clamp(rel_lo, rel_hi);
+        corrected += 1;
+    }
+    // Y'leri 0..1 clamp
+    for y in ys.iter_mut() {
+        if *y < 0.0 || *y > 1.0 {
+            *y = y.clamp(0.0, 1.0);
+            corrected += 1;
+        }
+    }
+    corrected
 }
 
 pub fn get_config_path() -> Option<String> {
@@ -217,9 +271,9 @@ mod tests {
         let loaded: Config = toml::from_str(&toml_str).unwrap();
         assert_eq!(loaded.thread_interval_ms, config.thread_interval_ms);
         assert_eq!(loaded.mouse_sens, config.mouse_sens);
-        assert_eq!(loaded.config_version, 1);
+        assert_eq!(loaded.config_version, 2);
         assert_eq!(loaded.steering_mode, config.steering_mode);
-        assert_eq!(loaded.brake_hold_ms, config.brake_hold_ms);
+        assert_eq!(loaded.brake_lifecycle_ms, config.brake_lifecycle_ms);
     }
 
     #[test]
@@ -242,7 +296,7 @@ mod tests {
         let config: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(config.mouse_sens, 5.0);
         assert_eq!(config.thread_interval_ms, 4);
-        assert_eq!(config.brake_hold_ms, 1750);
+        assert_eq!(config.brake_lifecycle_ms, 3500);
     }
 
     #[test]
@@ -251,14 +305,14 @@ mod tests {
         config.thread_interval_ms = 100;
         config.mouse_sens = 50.0;
         config.steering_mode = 99;
-        config.brake_hold_ms = -10;
+        config.brake_lifecycle_ms = -10;
 
         let corrected = config.validate();
         assert!(corrected >= 4);
         assert_eq!(config.thread_interval_ms, 20);
         assert_eq!(config.mouse_sens, 10.0);
         assert_eq!(config.steering_mode, 3);
-        assert_eq!(config.brake_hold_ms, 100);
+        assert_eq!(config.brake_lifecycle_ms, 200);
     }
 
     #[test]
@@ -278,5 +332,28 @@ mod tests {
         let mut config = Config::default();
         let corrected = config.validate();
         assert_eq!(corrected, 0);
+    }
+
+    #[test]
+    fn lifecycle_curve_fixed_split_at_half() {
+        let mut xs = [0.0, 0.2, 0.4, 0.7, 0.6, 0.85, 1.0]; // X[3] yanlis
+        let mut ys = [0.0; 7];
+        sanitize_lifecycle_curve(&mut xs, &mut ys);
+        assert_eq!(xs[0], 0.0);
+        assert_eq!(xs[3], 0.5);
+        assert_eq!(xs[6], 1.0);
+    }
+
+    #[test]
+    fn lifecycle_curve_zones_enforce_order() {
+        let mut xs = [0.0, 0.45, 0.10, 0.5, 0.95, 0.55, 1.0]; // X[2]<X[1], X[5]<X[4]
+        let mut ys = [0.0; 7];
+        sanitize_lifecycle_curve(&mut xs, &mut ys);
+        // press zonu (idx 1, 2)
+        assert!(xs[1] < xs[2]);
+        assert!(xs[2] < 0.5);
+        // release zonu (idx 4, 5)
+        assert!(xs[4] < xs[5]);
+        assert!(xs[4] > 0.5);
     }
 }
