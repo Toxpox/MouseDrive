@@ -1,4 +1,4 @@
-# MouseDrive (Rust) — Beta Branch
+# MouseDrive (Rust) — Beta Linux Branch
 
 [![Language](https://img.shields.io/badge/language-Rust-black)](#build)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
