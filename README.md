@@ -108,12 +108,11 @@ MouseDrive/
 │   └── vjoy.rs          # vJoy FFI (runtime DLL loading, axis/button API)
 ├── Cargo.toml
 ├── LICENSE
+├── CHANGELOG.md
 └── README.md
 ```
 
-Design notes for the curve editors and the updater live in `graph.md` and
-`auto-update.md`; the UI redesign spec is in `UImake.md`; the feature/performance
-roadmap is in `todo1.md`; release history in [CHANGELOG.md](CHANGELOG.md).
+Release history in [CHANGELOG.md](CHANGELOG.md).
 
 ## Troubleshooting
 
