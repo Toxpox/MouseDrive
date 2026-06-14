@@ -1,4 +1,4 @@
-# MouseDrive (Rust) — v0.4.0
+# MouseDrive (Rust) — v0.5.0
 
 [![Platform](https://img.shields.io/badge/platform-Windows-0078D6)](#requirements)
 [![Language](https://img.shields.io/badge/language-Rust-black)](#build)
@@ -24,12 +24,14 @@ Or browse all versions at [Releases](https://github.com/Toxpox/MouseDrive/releas
 ## Features
 
 - **Steering** — Mouse X movement mapped to vJoy X axis with 4 modes (linear, expo*, filtered*, self-centering)
-- **Throttle** — Left mouse button with configurable ramp/drop curves
-- **Brake** — Right mouse button with full state machine (press, hold, release)
+- **Throttle** — Left mouse button with graphical rise/fall envelope curves
+- **Brake** — Right mouse button with full state machine (press, hold, progressive trail-off, release)
+- **Graphical curve editors** — Drag-point envelope editors (2–8 points, linear or smooth/monotone-cubic) for throttle rise/fall, brake apply, and brake post-hold drop, with presets and a live marker
 - **Gear buttons** — W/S keys mapped to vJoy buttons 1/2
-- **Live dashboard** — Real-time progress bars for steering, throttle, brake
+- **Live dashboard** — Colour-coded vertical gauges (throttle green / brake red) and a bidirectional steering bar; real-time status and input indicator pills
 - **Tabbed settings panel** — Collapsible side panel with per-category tuning
 - **Config persistence** — TOML-based config with load/save/reset
+- **Auto-update** — Background check against GitHub releases with one-click self-update (download → SHA-256 verify → replace → restart)
 - **Raw input capture** — Works even when the window is not focused (F8 toggle)
 - **Lock-free architecture** — Atomic globals between raw input thread and GUI thread
 - **Language support** — Turkish and English UI (switchable in Settings > General)
@@ -58,8 +60,9 @@ Or browse all versions at [Releases](https://github.com/Toxpox/MouseDrive/releas
 ## How it works
 
 - **Raw input thread** — Dedicated thread with a hidden window that receives `WM_INPUT` messages for mouse deltas and button states.
-- **Atomic communication** — `AtomicI64`, `AtomicBool`, `AtomicU64` for zero-lock data transfer between threads.
-- **GUI thread** — eframe/egui loop that reads atomics, runs control logic, updates vJoy, and renders the UI.
+- **Atomic communication** — `AtomicI64`, `AtomicBool`, `AtomicU64` + `Mutex<Snapshot>` for zero-lock data transfer between threads.
+- **Control thread** — Dedicated `THREAD_PRIORITY_HIGHEST` 250 Hz loop (`control.rs`) that owns the vJoy handle. The axis feed never stalls on window minimize or repaint lag.
+- **GUI thread** — eframe/egui loop that reads the shared snapshot for gauges/indicators and publishes config changes; repaint-lazy (~60 Hz focused, ~4 Hz backgrounded).
 
 ## Requirements
 
@@ -93,16 +96,24 @@ Use the **Save** / **Load** / **Default** buttons in the settings panel, or edit
 ```
 MouseDrive/
 ├── src/
-│   ├── main.rs      # App struct, entry point, vJoy connection
-│   ├── config.rs    # Config struct, TOML load/save, path resolution
-│   ├── input.rs     # Raw input thread, atomic globals, key helpers
-│   ├── logic.rs     # Steering/throttle/brake state machine & math
-│   ├── ui.rs        # egui UI (side panel, tabs, dashboard)
-│   └── vjoy.rs      # vJoy FFI (runtime DLL loading, axis/button API)
+│   ├── main.rs          # App struct, entry point, vJoy connection
+│   ├── config.rs        # Config struct, TOML load/save, path resolution
+│   ├── input.rs         # Raw input thread, atomic globals, key helpers
+│   ├── logic.rs         # Steering/throttle/brake state machine & math
+│   ├── curve.rs         # Envelope curve model (PCHIP eval/inverse, presets)
+│   ├── curve_editor.rs  # Interactive drag-point egui curve widget
+│   ├── ui.rs            # egui UI (side panel, tabs, dashboard)
+│   ├── update.rs        # GitHub update check + one-click self-update
+│   ├── lang.rs          # TR/EN localization strings
+│   └── vjoy.rs          # vJoy FFI (runtime DLL loading, axis/button API)
 ├── Cargo.toml
 ├── LICENSE
 └── README.md
 ```
+
+Design notes for the curve editors and the updater live in `graph.md` and
+`auto-update.md`; the UI redesign spec is in `UImake.md`; the feature/performance
+roadmap is in `todo1.md`; release history in [CHANGELOG.md](CHANGELOG.md).
 
 ## Troubleshooting
 

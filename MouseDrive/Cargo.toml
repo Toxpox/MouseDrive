@@ -1,17 +1,19 @@
 [package]
 name = "mousedrive"
-version = "0.3.0"
+version = "0.5.0"
 edition = "2024"
 
 [dependencies]
 windows = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
     "Win32_UI_Input",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Shell",
     "Win32_Graphics_Gdi",
+    "Win32_Media",
 ] }
 libloading = "0.8"
 eframe = "0.31"
@@ -19,8 +21,21 @@ egui = "0.31"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 
+# Otomatik guncelleme yalniz "updater" feature'i ile derlenir (varsayilan acik).
+# --no-default-features ile ~2MB daha kucuk, ag/TLS bagimliliksiz "lean" build.
+self-replace = { version = "1", optional = true }
+serde_json = { version = "1", optional = true }
+sha2 = { version = "0.10", optional = true }
+ureq = { version = "2", optional = true }
+zip = { version = "2", default-features = false, features = ["deflate"], optional = true }
+
+[features]
+default = ["updater"]
+updater = ["dep:self-replace", "dep:serde_json", "dep:sha2", "dep:ureq", "dep:zip"]
+
 [profile.release]
 opt-level = 3
 lto = true
 codegen-units = 1
 strip = true
+panic = "abort"

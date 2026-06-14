@@ -1,5 +1,7 @@
-use serde::{Deserialize, Serialize};
+﻿use serde::{Deserialize, Serialize};
 use windows::Win32::UI::Shell::{CSIDL_APPDATA, SHGFP_TYPE_CURRENT, SHGetFolderPathW};
+
+use crate::curve::Curve;
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -13,6 +15,12 @@ pub struct Config {
     pub exit_on_close: bool,
     pub capture_toggle_key: i32,
     pub language: i32,
+    pub vjoy_device_id: i32,
+
+    // guncelleme denetimi
+    pub auto_check_updates: bool,
+    pub last_update_check: i64,
+    pub skipped_version: String,
 
     // direksiyon
     pub mouse_sens: f64,
@@ -46,6 +54,13 @@ pub struct Config {
     pub brake_trail_enabled: bool,
     pub brake_after_release_hold_ratio: f64,
     pub brake_after_release_hold_ms: i32,
+
+    // zarf egrileri - TOML'da tablo olarak serilesirler;
+    // skaler alanlardan SONRA kalmalari gerekir (toml::to_string_pretty kurali)
+    pub throttle_rise_curve: Curve,
+    pub throttle_fall_curve: Curve,
+    pub brake_apply_curve: Curve,
+    pub brake_posthold_curve: Curve,
 }
 
 impl Default for Config {
@@ -55,9 +70,16 @@ impl Default for Config {
 
             thread_interval_ms: 4,
             input_sink_enabled: true,
-            exit_on_close: false,
+            // true: X ile cikis (eski davranis). false: arka planda calismaya
+            // devam etmek icin simge durumuna kucult.
+            exit_on_close: true,
             capture_toggle_key: 0x77, // F8
             language: 1,              // 0=TR, 1=EN
+            vjoy_device_id: 1,
+
+            auto_check_updates: true,
+            last_update_check: 0,
+            skipped_version: String::new(),
 
             mouse_sens: 3.0,
             mouse_dpi_scale: 1.0,
@@ -88,14 +110,35 @@ impl Default for Config {
             brake_trail_enabled: false,
             brake_after_release_hold_ratio: 0.06,
             brake_after_release_hold_ms: 500,
+
+            // identity egriler: eski lineer rampa davranisi birebir korunur
+            throttle_rise_curve: Curve::default(),
+            throttle_fall_curve: Curve::default(),
+            brake_apply_curve: Curve::default(),
+            brake_posthold_curve: Curve::default(),
         }
     }
 }
 
+/// Mevcut config sema surumu. Yeni alanlar #[serde(default)] ile geriye
+/// uyumlu eklendigi surece artmaz; kirici bir yeniden adlandirma olursa
+/// artirilir ve migrate() icine bir match kolu eklenir.
+pub const CURRENT_CONFIG_VERSION: u32 = 1;
+
 impl Config {
     pub fn load_from_file(path: &str) -> Option<Self> {
         let content = std::fs::read_to_string(path).ok()?;
-        toml::from_str(&content).ok()
+        let mut cfg: Config = toml::from_str(&content).ok()?;
+        cfg.migrate();
+        Some(cfg)
+    }
+
+    /// Eski sema surumlerini ileri tasir. Su an tum alanlar serde(default)
+    /// ile uyumlu oldugundan no-op; gelecekteki kirici degisiklikler icin kanca.
+    /// (Ornek: `if self.config_version < 2 { /* v1 -> v2 donusumu */ }`)
+    fn migrate(&mut self) {
+        // Henuz kirici sema degisikligi yok.
+        self.config_version = CURRENT_CONFIG_VERSION;
     }
 
     pub fn save_to_file(&self, path: &str) -> std::io::Result<()> {
@@ -134,6 +177,17 @@ impl Config {
         v_i!(thread_interval_ms, 1, 20);
         v_i!(capture_toggle_key, 1, 255);
         v_i!(language, 0, 1);
+        v_i!(vjoy_device_id, 1, 16);
+
+        // guncelleme
+        if self.last_update_check < 0 {
+            self.last_update_check = 0;
+            corrected += 1;
+        }
+        if self.skipped_version.len() > 32 {
+            self.skipped_version.clear();
+            corrected += 1;
+        }
 
         // direksiyon
         v_f!(mouse_sens, 0.5, 10.0);
@@ -166,6 +220,12 @@ impl Config {
         v_f!(brake_curve_exp, 0.5, 4.0);
         v_f!(brake_after_release_hold_ratio, 0.0, 0.5);
         v_i!(brake_after_release_hold_ms, 0, 3000);
+
+        // egriler
+        corrected += self.throttle_rise_curve.validate();
+        corrected += self.throttle_fall_curve.validate();
+        corrected += self.brake_apply_curve.validate();
+        corrected += self.brake_posthold_curve.validate();
 
         corrected
     }
@@ -278,5 +338,44 @@ mod tests {
         let mut config = Config::default();
         let corrected = config.validate();
         assert_eq!(corrected, 0);
+    }
+
+    #[test]
+    fn curve_toml_roundtrip() {
+        use crate::curve::CurvePreset;
+
+        let mut config = Config::default();
+        config.throttle_rise_curve = Curve::preset(CurvePreset::SCurve);
+        config.brake_posthold_curve = Curve::preset(CurvePreset::Aggressive);
+
+        let toml_str = toml::to_string_pretty(&config).unwrap();
+        let loaded: Config = toml::from_str(&toml_str).unwrap();
+        assert_eq!(loaded.throttle_rise_curve, config.throttle_rise_curve);
+        assert_eq!(loaded.throttle_fall_curve, config.throttle_fall_curve);
+        assert_eq!(loaded.brake_apply_curve, config.brake_apply_curve);
+        assert_eq!(loaded.brake_posthold_curve, config.brake_posthold_curve);
+    }
+
+    #[test]
+    fn legacy_config_gets_identity_curves() {
+        // eski surum config'i: egri anahtarlari yok -> identity varsayilan
+        let toml_str = r#"
+            mouse_sens = 5.0
+            throttle_ramp_ms = 100
+        "#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(config.throttle_rise_curve.is_identity());
+        assert!(config.throttle_fall_curve.is_identity());
+        assert!(config.brake_apply_curve.is_identity());
+        assert!(config.brake_posthold_curve.is_identity());
+    }
+
+    #[test]
+    fn validate_repairs_broken_curve() {
+        let mut config = Config::default();
+        config.throttle_rise_curve.points = vec![[0.0, 0.0], [f64::NAN, 0.5], [1.0, 1.0]];
+        let corrected = config.validate();
+        assert!(corrected >= 1);
+        assert!(config.throttle_rise_curve.is_identity());
     }
 }

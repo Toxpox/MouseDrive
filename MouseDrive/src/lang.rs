@@ -25,6 +25,9 @@ impl Lang {
     }
 }
 
+// updater kapaliyken upd_* alanlari kullanilmaz; lean build'de dead_code'a izin
+// ver (varsayilan build tam dead_code denetimini korur)
+#[cfg_attr(not(feature = "updater"), allow(dead_code))]
 pub struct Strings {
     // panel & tabs
     pub settings: &'static str,
@@ -49,6 +52,8 @@ pub struct Strings {
     pub gauge_steering: &'static str,
     pub gauge_throttle: &'static str,
     pub gauge_brake: &'static str,
+    pub steer_left: &'static str,
+    pub steer_right: &'static str,
     pub left_click: &'static str,
     pub right_click: &'static str,
 
@@ -88,11 +93,42 @@ pub struct Strings {
     pub post_hold_ratio: &'static str,
     pub post_hold_ms: &'static str,
 
+    // curve editor
+    pub curve_rise: &'static str,
+    pub curve_fall: &'static str,
+    pub curve_apply: &'static str,
+    pub curve_posthold: &'static str,
+    pub curve_mode: &'static str,
+    pub curve_mode_linear: &'static str,
+    pub curve_mode_smooth: &'static str,
+    pub curve_preset: &'static str,
+    pub preset_linear: &'static str,
+    pub preset_s_curve: &'static str,
+    pub preset_aggressive: &'static str,
+    pub preset_progressive: &'static str,
+    pub curve_reset: &'static str,
+    pub curve_hint: &'static str,
+
     // general settings
     pub update_interval_ms: &'static str,
+    pub vjoy_device: &'static str,
     pub background_capture: &'static str,
     pub exit_on_close: &'static str,
     pub language: &'static str,
+
+    // update check
+    pub upd_auto_check: &'static str,
+    pub upd_check_now: &'static str,
+    pub upd_checking: &'static str,
+    pub upd_up_to_date: &'static str,
+    pub upd_failed: &'static str,
+    pub upd_available: &'static str,
+    pub upd_skip: &'static str,
+    pub upd_download: &'static str,
+    pub upd_update_btn: &'static str,
+    pub upd_updating: &'static str,
+    pub upd_restarting: &'static str,
+    pub upd_update_failed: &'static str,
 
     // vjoy status
     pub vjoy_connected: &'static str,
@@ -103,8 +139,7 @@ pub struct Strings {
     pub vjoy_acquire_failed: &'static str,
     pub vjoy_unknown: &'static str,
 
-    // config validation (v0.5+ UI'da kullanilacak)
-    #[allow(dead_code)]
+    // config validation
     pub config_corrected: &'static str,
 }
 
@@ -128,6 +163,8 @@ static TR: Strings = Strings {
     gauge_steering: "Direksiyon:",
     gauge_throttle: "Gaz:",
     gauge_brake: "Fren:",
+    steer_left: "Sol",
+    steer_right: "Sag",
     left_click: "Sol Tik",
     right_click: "Sag Tik",
 
@@ -164,10 +201,39 @@ static TR: Strings = Strings {
     post_hold_ratio: "Sonrasi Tutma Orani:",
     post_hold_ms: "Sonrasi Tutma (ms):",
 
+    curve_rise: "Yukselme Egrisi",
+    curve_fall: "Dusme Egrisi",
+    curve_apply: "Dolum Egrisi",
+    curve_posthold: "Tutma Sonrasi Dusus Egrisi",
+    curve_mode: "Interpolasyon:",
+    curve_mode_linear: "Lineer",
+    curve_mode_smooth: "Yumusak",
+    curve_preset: "Sablon",
+    preset_linear: "Lineer",
+    preset_s_curve: "S-Egrisi",
+    preset_aggressive: "Agresif",
+    preset_progressive: "Kademeli",
+    curve_reset: "Sifirla",
+    curve_hint: "Cift tik: nokta ekle | Sag tik: nokta sil",
+
     update_interval_ms: "Guncelleme (ms):",
+    vjoy_device: "vJoy Cihaz No:",
     background_capture: "Odak Disi Yakalama",
     exit_on_close: "Kapatinca Cik",
     language: "Dil:",
+
+    upd_auto_check: "Guncellemeleri otomatik denetle",
+    upd_check_now: "Simdi denetle",
+    upd_checking: "Denetleniyor...",
+    upd_up_to_date: "Guncel",
+    upd_failed: "Denetim basarisiz",
+    upd_available: "Yeni surum:",
+    upd_skip: "Atla",
+    upd_download: "Indir",
+    upd_update_btn: "Guncelle",
+    upd_updating: "Guncelleniyor...",
+    upd_restarting: "Yeniden baslatiliyor...",
+    upd_update_failed: "Guncelleme basarisiz",
 
     vjoy_connected: "vJoy baglandi \u{2713}",
     vjoy_dll_not_found: "vJoyInterface.dll bulunamadi! vJoy yuklu degil.",
@@ -200,6 +266,8 @@ static EN: Strings = Strings {
     gauge_steering: "Steering:",
     gauge_throttle: "Throttle:",
     gauge_brake: "Brake:",
+    steer_left: "Left",
+    steer_right: "Right",
     left_click: "LMB",
     right_click: "RMB",
 
@@ -236,10 +304,39 @@ static EN: Strings = Strings {
     post_hold_ratio: "Post-hold Ratio:",
     post_hold_ms: "Post-hold (ms):",
 
+    curve_rise: "Rise Curve",
+    curve_fall: "Fall Curve",
+    curve_apply: "Apply Curve",
+    curve_posthold: "Post-hold Drop Curve",
+    curve_mode: "Interpolation:",
+    curve_mode_linear: "Linear",
+    curve_mode_smooth: "Smooth",
+    curve_preset: "Preset",
+    preset_linear: "Linear",
+    preset_s_curve: "S-Curve",
+    preset_aggressive: "Aggressive",
+    preset_progressive: "Progressive",
+    curve_reset: "Reset",
+    curve_hint: "Double-click: add point | Right-click: remove point",
+
     update_interval_ms: "Update (ms):",
+    vjoy_device: "vJoy Device:",
     background_capture: "Background Capture",
     exit_on_close: "Exit on Close",
     language: "Language:",
+
+    upd_auto_check: "Check for updates automatically",
+    upd_check_now: "Check now",
+    upd_checking: "Checking...",
+    upd_up_to_date: "Up to date",
+    upd_failed: "Check failed",
+    upd_available: "New version:",
+    upd_skip: "Skip",
+    upd_download: "Download",
+    upd_update_btn: "Update",
+    upd_updating: "Updating...",
+    upd_restarting: "Restarting...",
+    upd_update_failed: "Update failed",
 
     vjoy_connected: "vJoy connected \u{2713}",
     vjoy_dll_not_found: "vJoyInterface.dll not found! vJoy is not installed.",

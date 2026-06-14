@@ -47,6 +47,9 @@ pub struct VJoyApi {
     set_axis: FnSetAxis,
     set_btn: FnSetBtn,
     reset_vjd: FnResetVJD,
+    /// Sahiplenilen cihaz; Drop'ta otomatik birakma + cift-birakma korumasi.
+    /// Cell: tek thread sahibi (kontrol thread'i), Send olmasi yeterli.
+    acquired: std::cell::Cell<Option<u32>>,
 }
 
 /// Bilinen konumlarda vJoyInterface.dll'i arar.
@@ -103,6 +106,7 @@ impl VJoyApi {
                 set_btn: sym!(b"SetBtn", FnSetBtn),
                 reset_vjd: sym!(b"ResetVJD", FnResetVJD),
                 _lib: lib,
+                acquired: std::cell::Cell::new(None),
             };
             Some(api)
         }
@@ -112,10 +116,18 @@ impl VJoyApi {
         unsafe { (self.vjoy_enabled)() }
     }
     pub fn acquire(&self, dev: u32) -> bool {
-        unsafe { (self.acquire_vjd)(dev) }
+        let ok = unsafe { (self.acquire_vjd)(dev) };
+        if ok {
+            self.acquired.set(Some(dev));
+        }
+        ok
     }
     pub fn relinquish(&self, dev: u32) {
         unsafe { (self.relinquish_vjd)(dev) }
+        // ayni cihazsa sahiplik kaydini temizle (Drop cift-birakma yapmasin)
+        if self.acquired.get() == Some(dev) {
+            self.acquired.set(None);
+        }
     }
     pub fn reset(&self, dev: u32) -> bool {
         unsafe { (self.reset_vjd)(dev) }
@@ -135,6 +147,16 @@ impl VJoyApi {
             2 => VjdStat::Busy,
             3 => VjdStat::Miss,
             _ => VjdStat::Unkn,
+        }
+    }
+}
+
+impl Drop for VJoyApi {
+    /// Kapanis emniyeti: acik birakma cagrilmadan dusulurse cihazi birak.
+    /// relinquish() acquired'i temizledigi icin cift-birakma olmaz.
+    fn drop(&mut self) {
+        if let Some(dev) = self.acquired.get() {
+            unsafe { (self.relinquish_vjd)(dev) }
         }
     }
 }

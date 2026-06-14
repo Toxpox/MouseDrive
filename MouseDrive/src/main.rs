@@ -1,15 +1,21 @@
 #![windows_subsystem = "windows"]
 
 mod config;
+mod control;
+mod curve;
+mod curve_editor;
 mod input;
 mod lang;
+mod log;
 mod logic;
 mod ui;
+#[cfg(feature = "updater")]
+mod update;
 mod vjoy;
 
 use std::ffi::c_void;
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use std::time::Instant;
 
 use eframe::egui;
 use windows::Win32::Foundation::HWND;
@@ -19,163 +25,114 @@ use windows::Win32::System::Threading::{
 };
 
 use crate::config::{Config, get_config_path};
+use crate::control::{Shared, Snapshot};
 use crate::input::*;
-use crate::logic::*;
-use crate::vjoy::{
-    AXIS_CENTER, AXIS_MAX, AXIS_MIN, HID_USAGE_RZ, HID_USAGE_X, HID_USAGE_Y, VJoyApi, VJoyStatus,
-    VjdStat,
-};
+use crate::vjoy::VJoyStatus;
 
-// --- MouseDrive uygulamasi ---
+// --- MouseDrive uygulamasi (GUI yarisi) ---
+//
+// Kontrol matematigi + vJoy artik ayri bir thread'de (control.rs). Bu struct
+// yalniz GUI'yi yonetir: config'i duzenler/yayinlar, anlik goruntuyu okur,
+// komut gonderir.
 
 pub(crate) struct MouseDriveApp {
     pub(crate) config: Config,
-    pub(crate) state: MouseDriveState,
-    pub(crate) vjoy: Option<VJoyApi>,
-    pub(crate) device_id: u32,
+    pub(crate) shared: Arc<Shared>,
+    pub(crate) snapshot: Snapshot,
     pub(crate) vjoy_status: VJoyStatus,
     pub(crate) settings_panel_open: bool,
     pub(crate) settings_tab: u8,
     pub(crate) title: String,
+    #[cfg(feature = "updater")]
+    pub(crate) update_checker: update::UpdateChecker,
+    #[cfg(feature = "updater")]
+    pub(crate) restart_initiated: bool,
+    /// Config yuklenirken duzeltilen alan sayisi varsa kullaniciya bildirilir.
+    pub(crate) config_notice: Option<u32>,
     _raw_input_handle: Option<std::thread::JoinHandle<()>>,
+    control_handle: Option<std::thread::JoinHandle<()>>,
 }
 
 impl MouseDriveApp {
     pub(crate) fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        cc.egui_ctx.set_visuals(egui::Visuals::dark());
+        // Koyu tema + tek accent (mavi): secili sekme ve slider dolgusu ACCENT.
+        // ONEMLI: stroke.color = secili selectable_value'nun YAZI rengi. ACCENT
+        // yapilirsa mavi-zemin-uzerine-mavi-yazi okunmaz olur; beyaz birakiyoruz
+        // ki secili sekme (Direksiyon/Gaz/Fren/Genel) ve combobox secimleri okunsun.
+        let mut visuals = egui::Visuals::dark();
+        visuals.selection.bg_fill = crate::ui::ACCENT;
+        visuals.selection.stroke.color = egui::Color32::WHITE;
+        cc.egui_ctx.set_visuals(visuals);
+
+        crate::log::line(concat!("MouseDrive v", env!("CARGO_PKG_VERSION"), " baslatildi"));
 
         let mut config = get_config_path()
             .and_then(|p| Config::load_from_file(&p))
             .unwrap_or_default();
 
         // Config dogrulama: sinir disi degerleri clamp et
-        let _corrected = config.validate();
+        let corrected = config.validate();
+        let config_notice = (corrected > 0).then_some(corrected);
 
-        // global state'i config ile senkronize et
+        // global state'i config ile senkronize et (input thread bunlari okur)
         INPUT_SINK_ENABLED.store(config.input_sink_enabled, Ordering::Release);
         MOUSE_DELTA_CAP.store(config.mouse_delta_cap, Ordering::Release);
         store_dpi_scale(config.mouse_dpi_scale);
 
         let raw_input_handle = start_raw_input_thread();
-        let (vjoy, vjoy_status) = Self::connect_vjoy(1);
+
+        // kontrol thread'i: vJoy handle'ina sahip, 250Hz bagimsiz dongu
+        let shared = Shared::new(config.clone());
+        let control_handle = control::spawn(Arc::clone(&shared));
+
+        // gunde 1 otomatik guncelleme denetimi (ayri thread, acilisi geciktirmez)
+        #[cfg(feature = "updater")]
+        let update_checker = {
+            let checker = update::UpdateChecker::new();
+            if config.auto_check_updates {
+                let now_ts = update::unix_now();
+                if now_ts - config.last_update_check >= 86_400 {
+                    config.last_update_check = now_ts;
+                    if let Some(path) = get_config_path() {
+                        let _ = config.save_to_file(&path);
+                    }
+                    // zaman damgasi degisti — kontrol thread'ine de yansit
+                    shared.publish_config(&config);
+                    checker.spawn_check();
+                }
+            }
+            checker
+        };
 
         Self {
             config,
-            state: MouseDriveState::new(),
-            vjoy,
-            device_id: 1,
-            vjoy_status,
+            shared,
+            snapshot: Snapshot::default(),
+            vjoy_status: VJoyStatus::Unknown,
             settings_panel_open: true,
             settings_tab: 0,
             title: format!("MouseDrive v{}", env!("CARGO_PKG_VERSION")),
+            #[cfg(feature = "updater")]
+            update_checker,
+            #[cfg(feature = "updater")]
+            restart_initiated: false,
+            config_notice,
             _raw_input_handle: Some(raw_input_handle),
+            control_handle: Some(control_handle),
         }
     }
 
-    /// vJoy baglantisini kur veya yeniden kur
-    fn connect_vjoy(device_id: u32) -> (Option<VJoyApi>, VJoyStatus) {
-        match VJoyApi::load() {
-            Some(api) => {
-                if !api.is_enabled() {
-                    return (None, VJoyStatus::DriverDisabled);
-                }
-                let status = api.get_status(device_id);
-                match status {
-                    VjdStat::Free | VjdStat::Own => {
-                        if api.acquire(device_id) {
-                            api.reset(device_id);
-                            (Some(api), VJoyStatus::Connected)
-                        } else {
-                            (None, VJoyStatus::AcquireFailed)
-                        }
-                    }
-                    VjdStat::Busy => (None, VJoyStatus::DeviceBusy),
-                    VjdStat::Miss => (None, VJoyStatus::DeviceMissing),
-                    _ => (None, VJoyStatus::Unknown),
-                }
-            }
-            None => (None, VJoyStatus::DllNotFound),
+    /// Kontrol thread'ini durdurup vJoy'un birakilmasini bekler.
+    pub(crate) fn stop_control_thread(&mut self) {
+        self.shared.stop();
+        if let Some(handle) = self.control_handle.take() {
+            let _ = handle.join();
         }
     }
 
-    pub(crate) fn try_reconnect_vjoy(&mut self) {
-        if let Some(ref vjoy) = self.vjoy {
-            vjoy.relinquish(self.device_id);
-        }
-        let (vjoy, status) = Self::connect_vjoy(self.device_id);
-        self.vjoy = vjoy;
-        self.vjoy_status = status;
-    }
-
-    pub(crate) fn update_input(&mut self) {
-        let now = Instant::now();
-        let delta_ms = now.duration_since(self.state.last_update).as_secs_f64() * 1000.0;
-        self.state.last_update = now;
-
-        // F8 toggle
-        let key_pressed = is_key_down(self.config.capture_toggle_key);
-        if key_pressed && !self.state.capture_key_prev {
-            self.state.capture_enabled = !self.state.capture_enabled;
-            self.reset_state();
-        }
-        self.state.capture_key_prev = key_pressed;
-
-        // orta tik -> direksiyon sifirla
-        if MIDDLE_BUTTON_CLICKED.swap(false, Ordering::Acquire) {
-            self.state.steering = 0.0;
-            self.state.steering_filtered = 0.0;
-        }
-
-        self.state.w_key_pressed = is_key_down(0x57); // W
-        self.state.s_key_pressed = is_key_down(0x53); // S
-
-        let safe_interval = self.config.thread_interval_ms.max(1) as f64;
-        let time_scale = (delta_ms / safe_interval).clamp(0.5, 2.0);
-
-        if self.state.capture_enabled {
-            self.state.update_steering(&self.config, delta_ms);
-            self.state.update_throttle(&self.config, time_scale);
-            self.state.update_brake(&self.config, now, time_scale);
-        } else {
-            self.state.steering_filtered = 0.0;
-            self.state.throttle = 0.0;
-            self.state.brake = 0.0;
-        }
-
-        self.send_to_vjoy();
-    }
-
-    fn reset_state(&mut self) {
-        LEFT_BUTTON.store(false, Ordering::Release);
-        RIGHT_BUTTON.store(false, Ordering::Release);
-        MOUSE_DELTA_X.store(0, Ordering::Relaxed);
-        self.state.steering = 0.0;
-        self.state.steering_filtered = 0.0;
-        self.state.throttle = 0.0;
-        self.state.throttle_target = 0.0;
-        self.state.brake = 0.0;
-        self.state.brake_state = BrakeState::Idle;
-        if let Some(ref vjoy) = self.vjoy {
-            vjoy.reset(self.device_id);
-        }
-    }
-
-    fn send_to_vjoy(&self) {
-        let Some(ref vjoy) = self.vjoy else { return };
-
-        let safe_steering = self
-            .state
-            .steering_filtered
-            .clamp(-STEERING_RANGE, STEERING_RANGE);
-        let steer_axis = (AXIS_CENTER + safe_steering.round() as i32).clamp(AXIS_MIN, AXIS_MAX);
-        let throttle_axis = (self.state.throttle * AXIS_MAX as f64).round() as i32;
-        let brake_axis = (self.state.brake * AXIS_MAX as f64).round() as i32;
-
-        vjoy.set_axis(steer_axis, self.device_id, HID_USAGE_X);
-        vjoy.set_axis(throttle_axis, self.device_id, HID_USAGE_Y);
-        vjoy.set_axis(brake_axis, self.device_id, HID_USAGE_RZ);
-        vjoy.set_btn(self.state.w_key_pressed, self.device_id, 1);
-        vjoy.set_btn(self.state.s_key_pressed, self.device_id, 2);
+    /// GUI config'i degistirdiginde kontrol thread'ine yayinlar.
+    pub(crate) fn publish_config(&self) {
+        self.shared.publish_config(&self.config);
     }
 
     pub(crate) fn sync_globals_from_config(&self) {
@@ -198,7 +155,6 @@ fn main() -> eframe::Result<()> {
     }
 
     // Proses onceligi: HIGH_PRIORITY_CLASS (0x80)
-    // Windows scheduler bu prosesi normal proseslerin onune alir
     unsafe {
         let _ = SetPriorityClass(GetCurrentProcess(), PROCESS_CREATION_FLAGS(0x80));
     }
